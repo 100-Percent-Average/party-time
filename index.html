@@ -242,11 +242,66 @@
   // Soft light sprites (drawn additively, much cheaper than live gradients)
   function makeGlow(rgb) {
     const c = document.createElement('canvas'); c.width = c.height = 64;
-    const g = c.getContext('2d'), gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
-    gr.addColorStop(0, `rgba(${rgb},1)`); gr.addColorStop(0.22, `rgba(${rgb},.55)`);
-    gr.addColorStop(0.55, `rgba(${rgb},.14)`); gr.addColorStop(1, `rgba(${rgb},0)`);
-    g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+    const g = c.getContext('2d');
+    // low-poly light: stacked hard-edged polygons instead of a soft falloff
+    const ring = (r, n, rot, a) => {
+      g.fillStyle = `rgba(${rgb},${a})`; g.beginPath();
+      for (let i = 0; i < n; i++) { const t = rot + i * TAU / n; g.lineTo(32 + Math.cos(t) * r, 32 + Math.sin(t) * r); }
+      g.closePath(); g.fill();
+    };
+    ring(31, 8, 0.39, 0.09); ring(21, 8, 0, 0.15); ring(11.5, 6, 0.52, 0.32); ring(5.5, 6, 0, 1);
     return c;
+  }
+
+  /* Low-poly helpers */
+  function poly(x, y, r, n, rot) {
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) { const a = rot + i * TAU / n; ctx.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r); }
+    ctx.closePath();
+  }
+  // a faceted "gem": a fan of triangles around an off-centre peak, each flat-shaded by its angle to the light
+  function gem(x, y, r, n, rot, c, f, c2) {
+    const px = x - r * 0.18, py = y - r * 0.24;
+    for (let i = 0; i < n; i++) {
+      const a0 = rot + i * TAU / n, a1 = a0 + TAU / n, sh = 0.78 + 0.3 * Math.cos((a0 + a1) / 2 + 2.2);
+      const base = c2 && i % 2 ? c2 : c;
+      const col = fogc([Math.min(255, base[0] * sh), Math.min(255, base[1] * sh), Math.min(255, base[2] * sh)], f);
+      ctx.fillStyle = col; ctx.strokeStyle = col; ctx.lineWidth = 0.6;
+      ctx.beginPath(); ctx.moveTo(px, py);
+      ctx.lineTo(x + Math.cos(a0) * r, y + Math.sin(a0) * r); ctx.lineTo(x + Math.cos(a1) * r, y + Math.sin(a1) * r);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+    }
+  }
+  // a jittered triangle mesh coloured from a ramp: the faceted sky and ground
+  function buildMesh(cols, rows, stops, seed) {
+    const r = rng(seed), pts = [], tris = [];
+    for (let j = 0; j < rows.length; j++) for (let i = 0; i <= cols; i++) {
+      const edgeX = i === 0 || i === cols, edgeY = j === 0 || j === rows.length - 1;
+      const dy = edgeY ? 0 : (r() - 0.5) * 0.55 * Math.min(rows[j] - rows[j - 1], rows[j + 1] - rows[j]);
+      pts.push([i / cols + (edgeX ? 0 : (r() - 0.5) * 0.6 / cols), rows[j] + dy]);
+    }
+    const col = t => {
+      let k = 0; while (k < stops.length - 2 && t > stops[k + 1][0]) k++;
+      const a = stops[k], b = stops[k + 1], u = clamp((t - a[0]) / (b[0] - a[0]), 0, 1);
+      return `rgb(${(a[1][0] + (b[1][0] - a[1][0]) * u) | 0},${(a[1][1] + (b[1][1] - a[1][1]) * u) | 0},${(a[1][2] + (b[1][2] - a[1][2]) * u) | 0})`;
+    };
+    for (let j = 0; j < rows.length - 1; j++) for (let i = 0; i < cols; i++) {
+      const a = pts[j * (cols + 1) + i], b = pts[j * (cols + 1) + i + 1], c = pts[(j + 1) * (cols + 1) + i], d = pts[(j + 1) * (cols + 1) + i + 1];
+      const pair = (i + j) % 2 ? [[a, b, c], [b, d, c]] : [[a, b, d], [a, d, c]];
+      for (const t of pair) {
+        const cy = (t[0][1] + t[1][1] + t[2][1]) / 3;
+        tris.push([t[0][0], t[0][1], t[1][0], t[1][1], t[2][0], t[2][1], col(clamp(cy + (r() - 0.5) * 0.09, 0, 1))]);
+      }
+    }
+    return tris;
+  }
+  function drawMesh(m, x, y, w, h) {
+    ctx.lineWidth = 1; ctx.lineJoin = 'round';
+    for (const t of m) {
+      ctx.fillStyle = t[6]; ctx.strokeStyle = t[6];
+      ctx.beginPath(); ctx.moveTo(x + t[0] * w, y + t[1] * h); ctx.lineTo(x + t[2] * w, y + t[3] * h); ctx.lineTo(x + t[4] * w, y + t[5] * h);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+    }
   }
   const GL = {
     warm: makeGlow('255,196,110'), white: makeGlow('255,244,224'), mag: makeGlow('230,59,138'),
@@ -254,6 +309,10 @@
   };
   const GLK = [GL.gold, GL.mag, GL.teal, GL.white, GL.violet, GL.warm];
   function glow(sp, x, y, r, a) { ctx.globalAlpha = a; ctx.drawImage(sp, x - r, y - r, r * 2, r * 2); }
+  const SKY = buildMesh(10, [0, 0.2, 0.4, 0.57, 0.71, 0.83, 0.92, 1],
+    [[0, hex('#0B0729')], [0.45, hex('#1F1260')], [0.8, hex('#5A2388')], [0.94, hex('#C93A80')], [1, hex('#FF8F4A')]], 11);
+  const GND = buildMesh(9, [0, 0.1, 0.28, 0.58, 1],
+    [[0, hex('#5A2A80')], [0.25, hex('#341A5E')], [1, hex('#190D38')]], 23);
 
   /* World layout (units ≈ metres). You ride a float down a wide boulevard toward a colossal clock tower. */
   const TS = 3;                    // tower scale
@@ -572,8 +631,8 @@
     const hx = sx - sway * 0.7, shx = sx + sway;
     const hipY = y0 - (0.92 * sc + ext) * s, shY = hipY - 0.5 * s * sc;
     const headY = shY - 0.21 * s * sc - Math.abs(Math.cos(ph)) * 0.02 * s, hr = 0.14 * s;
-    const lw = Math.max(1, 0.1 * s);
-    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    const lw = Math.max(1, 0.115 * s);
+    ctx.lineCap = 'butt'; ctx.lineJoin = 'bevel';
 
     if (full) {
       ctx.fillStyle = 'rgba(10,5,30,.38)';
@@ -638,8 +697,10 @@
     ctx.closePath(); ctx.fill();
     if (full) {
       // rim light down one side, then a sash
-      ctx.fillStyle = 'rgba(255,240,210,.16)';
-      ctx.beginPath(); ctx.moveTo(shx - sw, shY); ctx.lineTo(shx - sw * 0.3, shY); ctx.lineTo(hx - hw * 0.3, hipY + 0.05 * s); ctx.lineTo(hx - hw, hipY + 0.05 * s); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = 'rgba(255,240,210,.26)';
+      ctx.beginPath(); ctx.moveTo(shx - sw, shY); ctx.lineTo(shx + sw * 0.1, shY); ctx.lineTo(hx - hw * 0.2, hipY + 0.05 * s); ctx.lineTo(hx - hw, hipY + 0.05 * s); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = 'rgba(14,6,48,.2)';
+      ctx.beginPath(); ctx.moveTo(shx + sw, shY); ctx.lineTo(shx + sw * 0.45, shY); ctx.lineTo(hx + hw * 0.5, hipY + 0.05 * s); ctx.lineTo(hx + hw, hipY + 0.05 * s); ctx.closePath(); ctx.fill();
       ctx.strokeStyle = fogc(m.trim, f); ctx.lineWidth = lw * 0.7;
       ctx.beginPath(); ctx.moveTo(shx - sw * 0.9, shY + 0.03 * s); ctx.lineTo(hx + hw * 0.9, hipY); ctx.stroke();
     }
@@ -738,10 +799,13 @@
     }
 
     // head, hair, hat
+    const R6 = hr * 1.12;
     ctx.fillStyle = fogc(m.skin, f);
-    ctx.beginPath(); ctx.arc(shx, headY, hr, 0, TAU); ctx.fill();
+    poly(shx, headY, R6, 6, 0); ctx.fill();
+    ctx.fillStyle = 'rgba(14,6,48,.18)';
+    ctx.beginPath(); ctx.moveTo(shx, headY - R6 * 0.87); ctx.lineTo(shx + R6 * 0.5, headY - R6 * 0.87); ctx.lineTo(shx + R6, headY); ctx.lineTo(shx + R6 * 0.5, headY + R6 * 0.87); ctx.lineTo(shx, headY + R6 * 0.87); ctx.closePath(); ctx.fill();
     ctx.fillStyle = fogc(m.hair, f);
-    ctx.beginPath(); ctx.arc(shx, headY - hr * 0.12, hr * 1.02, Math.PI * 0.95, Math.PI * 2.05); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(shx - R6, headY); ctx.lineTo(shx - R6 * 0.5, headY - R6 * 0.87); ctx.lineTo(shx + R6 * 0.5, headY - R6 * 0.87); ctx.lineTo(shx + R6, headY); ctx.lineTo(shx + R6 * 0.55, headY - R6 * 0.2); ctx.lineTo(shx - R6 * 0.55, headY - R6 * 0.2); ctx.closePath(); ctx.fill();
     if (m.hat === 'cone') {
       ctx.fillStyle = fogc(m.trim, f);
       ctx.beginPath(); ctx.moveTo(shx - hr * 0.85, headY - hr * 0.6); ctx.lineTo(shx + hr * 0.85, headY - hr * 0.6);
@@ -815,27 +879,17 @@
       ctx.closePath();
       ctx.fillStyle = fogc(b.c1, f); ctx.fill();
       ctx.lineWidth = Math.max(1, r * 0.08); ctx.lineJoin = 'round'; ctx.strokeStyle = fogc(b.c2, f); ctx.stroke();
-      ctx.fillStyle = fogc(C.paper, f, 0.5);
-      ctx.beginPath(); ctx.ellipse(-r * 0.22, -r * 0.3, r * 0.2, r * 0.09, -0.6, 0, TAU); ctx.fill();
+      // facets: every other point-to-centre wedge sits in shade
+      ctx.fillStyle = 'rgba(14,6,48,.2)';
+      for (let i = 0; i < 10; i += 2) {
+        const a0 = -Math.PI / 2 + (i * Math.PI) / 5, a1 = a0 + Math.PI / 5;
+        ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(a0) * r * 1.1, Math.sin(a0) * r * 1.1); ctx.lineTo(Math.cos(a1) * r * 0.5, Math.sin(a1) * r * 0.5); ctx.closePath(); ctx.fill();
+      }
     } else if (b.kind === 'orb') {
-      ctx.save();
-      ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.clip();
-      ctx.fillStyle = fogc(b.c1, f); ctx.fillRect(-r, -r, 2 * r, 2 * r);
-      ctx.fillStyle = fogc(b.c2, f);
-      const spin = (T * 0.4 + b.ph) % 1;
-      for (let i = -3; i < 3; i++) { ctx.beginPath(); ctx.ellipse(((i + spin) / 3) * r, 0, r * 0.16, r, 0, 0, TAU); ctx.fill(); }
-      const gr = ctx.createRadialGradient(-r * 0.35, -r * 0.4, r * 0.1, 0, 0, r);
-      gr.addColorStop(0, 'rgba(255,255,255,.4)'); gr.addColorStop(0.6, 'rgba(255,255,255,0)'); gr.addColorStop(1, 'rgba(20,10,60,.5)');
-      ctx.fillStyle = gr; ctx.fillRect(-r, -r, 2 * r, 2 * r);
-      ctx.restore();
+      gem(0, 0, r, 9, T * 0.25 + b.ph, b.c1, f, b.c2);
     } else {
       const pts = [[0, -0.55], [-0.6, -0.15], [0.6, -0.15], [-0.35, 0.45], [0.35, 0.45], [0, 0.05]];
-      pts.forEach(([px, py], i) => {
-        ctx.fillStyle = fogc(COSTUME[(i + (b.ph * 2 | 0)) % 6], f);
-        ctx.beginPath(); ctx.arc(px * r, py * r, r * 0.48, 0, TAU); ctx.fill();
-        ctx.fillStyle = fogc(C.paper, f, 0.45);
-        ctx.beginPath(); ctx.arc(px * r - r * 0.15, py * r - r * 0.17, r * 0.1, 0, TAU); ctx.fill();
-      });
+      pts.forEach(([px, py], i) => gem(px * r, py * r, r * 0.5, 6, i, COSTUME[(i + (b.ph * 2 | 0)) % 6], f));
     }
     ctx.restore();
   }
@@ -894,10 +948,7 @@
         for (let i = 0; i <= 12; i++) {
           const a0 = Math.PI + (i / 12) * Math.PI, bobb = Math.sin(T * 2 + i + fl.ph) * 0.08;
           const bx = foot[0] + Math.cos(a0) * 2.5 * hk, by = foot[1] + Math.sin(a0) * (2.4 + bobb) * hk;
-          ctx.fillStyle = fogc(COSTUME[i % 6], f);
-          ctx.beginPath(); ctx.arc(bx, by, 0.55 * hk, 0, TAU); ctx.fill();
-          ctx.fillStyle = fogc(C.paper, f, 0.4);
-          ctx.beginPath(); ctx.arc(bx - 0.16 * hk, by - 0.18 * hk, 0.13 * hk, 0, TAU); ctx.fill();
+          gem(bx, by, 0.58 * hk, 6, i * 0.5, COSTUME[i % 6], f);
         }
       }
     }
@@ -905,9 +956,9 @@
 
     // front face with gradient, scalloped skirt, bulbs
     const top = d[1], bot = a[1];
-    const gr = ctx.createLinearGradient(0, top, 0, bot);
-    gr.addColorStop(0, fogc(fl.body, f)); gr.addColorStop(1, fogc(fl.body.map(v => v * 0.6), f));
-    ctx.fillStyle = gr; ctx.fillRect(a[0], top, b[0] - a[0], bot - top);
+    ctx.fillStyle = fogc(fl.body, f); ctx.fillRect(a[0], top, b[0] - a[0], bot - top);
+    ctx.fillStyle = 'rgba(14,6,48,.28)';   // one hard diagonal facet instead of a gradient
+    ctx.beginPath(); ctx.moveTo(a[0], bot); ctx.lineTo(b[0], top); ctx.lineTo(b[0], bot); ctx.closePath(); ctx.fill();
     const n = 8, wseg = (b[0] - a[0]) / n;
     for (let i = 0; i < n; i++) {
       ctx.fillStyle = fogc(i % 2 ? C.paper : fl.top, f);
@@ -936,10 +987,7 @@
     // back fin
     ctx.fillStyle = fogc(dg.c2, f);
     ctx.beginPath(); ctx.moveTo(q[0] - r * 0.5, q[1] - r * 0.7); ctx.lineTo(q[0], q[1] - r * 1.7); ctx.lineTo(q[0] + r * 0.5, q[1] - r * 0.7); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = fogc(i % 2 ? dg.c1 : dg.c2, f);
-    ctx.beginPath(); ctx.arc(q[0], q[1], r, 0, TAU); ctx.fill();
-    ctx.strokeStyle = fogc(C.gold, f); ctx.lineWidth = Math.max(1, r * 0.12);
-    ctx.beginPath(); ctx.arc(q[0], q[1], r * 0.62, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke();
+    gem(q[0], q[1], r, head ? 8 : 6, i * 0.4, i % 2 ? dg.c1 : dg.c2, f);
     if (head) {
       ctx.fillStyle = fogc(dg.c1, f);
       for (let sd = -1; sd <= 1; sd += 2) {   // horns and whiskers
@@ -1016,6 +1064,8 @@
     const a = P(x, 0, z0), b = P(x, bd.h, z0), c = P(x, bd.h, bd.z1), d = P(x, 0, bd.z1);
     const mid = (z0 + bd.z1) / 2 - camZ, f = fogOf(mid);
     ctx.fillStyle = fogc(bd.col, f); quad(a, b, c, d);
+    ctx.fillStyle = 'rgba(255,220,200,.07)';   // flat-shaded facet across each facade
+    ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.lineTo(c[0], c[1]); ctx.closePath(); ctx.fill();
     ctx.strokeStyle = fogc(C.ink, f * 0.6); ctx.lineWidth = Math.max(1, 0.35 * b[2]);
     ctx.beginPath(); ctx.moveTo(b[0], b[1]); ctx.lineTo(c[0], c[1]); ctx.stroke();
     if (mid > 260 * quality) return;
@@ -1109,10 +1159,8 @@
     });
 
     // stepped side wings with lit arcades
-    const wing = ctx.createLinearGradient(0, Y(4), 0, Y(50));
-    wing.addColorStop(0, '#7A1F6E'); wing.addColorStop(1, '#33176E');
-    ctx.fillStyle = wing;
     for (let sd = -1; sd <= 1; sd += 2) {
+      ctx.fillStyle = sd < 0 ? '#5A1E78' : '#3D1868';
       ctx.beginPath();
       ctx.moveTo(X(sd * 42), Y(4)); ctx.lineTo(X(sd * 68), Y(4)); ctx.lineTo(X(sd * 68), Y(34)); ctx.lineTo(X(sd * 60), Y(34));
       ctx.lineTo(X(sd * 60), Y(46)); ctx.lineTo(X(sd * 52), Y(46)); ctx.lineTo(X(sd * 52), Y(54)); ctx.lineTo(X(sd * 42), Y(54));
@@ -1121,13 +1169,11 @@
     for (let sd = -1; sd <= 1; sd += 2) for (let i = 0; i < 3; i++) {
       const ax = sd * (48.5 + i * 6.5);
       ctx.fillStyle = '#FFD27A';
-      ctx.beginPath(); ctx.moveTo(X(ax - 2), Y(6)); ctx.lineTo(X(ax - 2), Y(20)); ctx.arc(X(ax), Y(20), 2 * k, Math.PI, 0); ctx.lineTo(X(ax + 2), Y(6)); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(X(ax - 2), Y(6)); ctx.lineTo(X(ax - 2), Y(19)); ctx.lineTo(X(ax), Y(23)); ctx.lineTo(X(ax + 2), Y(19)); ctx.lineTo(X(ax + 2), Y(6)); ctx.closePath(); ctx.fill();
     }
 
     // main shaft
-    const body = ctx.createLinearGradient(0, Y(4), 0, Y(92));
-    body.addColorStop(0, '#A3266F'); body.addColorStop(0.6, '#5B1F86'); body.addColorStop(1, '#2F1670');
-    ctx.fillStyle = body;
+    ctx.fillStyle = '#4A1C80';
     ctx.beginPath();
     ctx.moveTo(X(-44), Y(4)); ctx.lineTo(X(-44), Y(80)); ctx.lineTo(X(-36), Y(86)); ctx.lineTo(X(-26), Y(86));
     ctx.lineTo(X(-26), Y(92)); ctx.lineTo(X(-14), Y(92)); ctx.lineTo(X(-14), Y(97)); ctx.lineTo(X(14), Y(97)); ctx.lineTo(X(14), Y(92));
@@ -1136,9 +1182,13 @@
     // ribs and a side shade
     ctx.fillStyle = 'rgba(255,220,180,.10)';
     for (const rx of [-42, -38.5, 37, 40.5]) ctx.fillRect(X(rx), Y(80), 1.5 * k, 76 * k);
-    const shade = ctx.createLinearGradient(X(-44), 0, X(44), 0);
-    shade.addColorStop(0, 'rgba(255,200,160,.12)'); shade.addColorStop(0.5, 'rgba(0,0,0,0)'); shade.addColorStop(1, 'rgba(10,5,40,.35)');
-    ctx.fillStyle = shade; ctx.fillRect(X(-44), Y(80), 88 * k, 76 * k);
+    // flat-shaded planes: a warm lower facet, a lit left edge, a shaded right side
+    ctx.fillStyle = '#8A2374';
+    ctx.beginPath(); ctx.moveTo(X(-44), Y(4)); ctx.lineTo(X(44), Y(4)); ctx.lineTo(X(44), Y(26)); ctx.lineTo(X(-44), Y(56)); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(255,200,160,.12)';
+    ctx.beginPath(); ctx.moveTo(X(-44), Y(4)); ctx.lineTo(X(-44), Y(80)); ctx.lineTo(X(-20), Y(80)); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(10,5,40,.3)';
+    ctx.beginPath(); ctx.moveTo(X(44), Y(4)); ctx.lineTo(X(44), Y(80)); ctx.lineTo(X(36), Y(86)); ctx.lineTo(X(14), Y(86)); ctx.closePath(); ctx.fill();
     // gold cornice lines
     ctx.fillStyle = '#FFB31A';
     ctx.fillRect(X(-44), Y(80.6), 88 * k, Math.max(1, 0.6 * k));
@@ -1174,18 +1224,21 @@
     ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
 
     // dial: shadow, rings, face
+    const NG = 24, g0 = -Math.PI / 2 - Math.PI / NG;
     ctx.fillStyle = 'rgba(20,8,50,.45)';
-    ctx.beginPath(); ctx.arc(cx, dcy + dr * 0.04, dr * 1.1, 0, TAU); ctx.fill();
-    ctx.fillStyle = '#E63B8A';
-    ctx.beginPath(); ctx.arc(cx, dcy, dr * 1.07, 0, TAU); ctx.fill();
-    const ring = ctx.createLinearGradient(0, dcy - dr, 0, dcy + dr);
-    ring.addColorStop(0, '#FFD05A'); ring.addColorStop(0.5, '#FFB31A'); ring.addColorStop(1, '#D9860A');
-    ctx.fillStyle = ring;
-    ctx.beginPath(); ctx.arc(cx, dcy, dr * 1.0, 0, TAU); ctx.fill();
-    const face = ctx.createRadialGradient(cx, dcy - dr * 0.3, dr * 0.1, cx, dcy, dr * 0.86);
-    face.addColorStop(0, '#FFFDF6'); face.addColorStop(1, '#F7E2BC');
-    ctx.fillStyle = face;
-    ctx.beginPath(); ctx.arc(cx, dcy, dr * 0.85, 0, TAU); ctx.fill();
+    poly(cx, dcy + dr * 0.04, dr * 1.1, NG, g0); ctx.fill();
+    gem(cx, dcy, dr * 1.07, NG, g0, C.magenta, 0);
+    gem(cx, dcy, dr * 1.0, NG, g0, C.marigold, 0, [242, 150, 14]);
+    // the face is a shallow cut gem: pale facets, quiet enough to read numbers on
+    ctx.fillStyle = '#FBEFD4'; poly(cx, dcy, dr * 0.85, NG, g0); ctx.fill();
+    const fx0 = cx - dr * 0.16, fy0 = dcy - dr * 0.22;
+    for (let i = 0; i < 12; i++) {
+      const a0 = g0 + i * TAU / 12, a1 = a0 + TAU / 12, sh = Math.cos((a0 + a1) / 2 + 2.2);
+      ctx.fillStyle = sh > 0 ? `rgba(255,255,255,${0.5 * sh})` : `rgba(196,140,84,${-0.2 * sh})`;
+      ctx.beginPath(); ctx.moveTo(fx0, fy0);
+      ctx.lineTo(cx + Math.cos(a0) * dr * 0.85, dcy + Math.sin(a0) * dr * 0.85); ctx.lineTo(cx + Math.cos(a1) * dr * 0.85, dcy + Math.sin(a1) * dr * 0.85);
+      ctx.closePath(); ctx.fill();
+    }
 
     // 60 bulbs: they fill up as each minute passes
     const secIdx = finaleOn ? -1 : (60 - bd.s) % 60;
@@ -1242,13 +1295,8 @@
       });
     }
     // glass highlight
-    ctx.save();
-    ctx.beginPath(); ctx.arc(cx, dcy, dr * 0.85, 0, TAU); ctx.clip();
-    const gl = ctx.createLinearGradient(cx - dr, dcy - dr, cx + dr * 0.2, dcy + dr * 0.3);
-    gl.addColorStop(0, 'rgba(255,255,255,.34)'); gl.addColorStop(0.45, 'rgba(255,255,255,0)');
-    ctx.fillStyle = gl;
-    ctx.beginPath(); ctx.ellipse(cx - dr * 0.25, dcy - dr * 0.75, dr * 0.9, dr * 0.5, -0.5, 0, TAU); ctx.fill();
-    ctx.restore();
+    ctx.fillStyle = 'rgba(255,255,255,.2)';
+    ctx.beginPath(); ctx.moveTo(cx - dr * 0.8, dcy - dr * 0.2); ctx.lineTo(cx - dr * 0.42, dcy - dr * 0.72); ctx.lineTo(cx - dr * 0.1, dcy - dr * 0.82); ctx.lineTo(cx - dr * 0.62, dcy - dr * 0.3); ctx.closePath(); ctx.fill();
 
     return { cx, dcy, dr };
   }
@@ -1403,10 +1451,8 @@
     }
 
     /* sky */
-    const sky = ctx.createLinearGradient(0, 0, 0, HZ);
-    sky.addColorStop(0, '#0B0729'); sky.addColorStop(0.45, '#1F1260');
-    sky.addColorStop(0.8, '#5A2388'); sky.addColorStop(0.95, '#C93A80'); sky.addColorStop(1, '#FF8F4A');
-    ctx.fillStyle = sky; ctx.fillRect(-30, -30, W + 60, HZ + 30);
+    ctx.fillStyle = '#0B0729'; ctx.fillRect(-30, -30, W + 60, HZ + 30);
+    drawMesh(SKY, -30, 0, W + 60, HZ);
     for (const s of stars) {
       ctx.fillStyle = `rgba(255,244,224,${0.35 + 0.35 * Math.sin(T * 1.7 + s.ph)})`;
       ctx.fillRect(s.x * W, s.y * HZ, s.r, s.r);
@@ -1475,9 +1521,8 @@
     for (const b of skyline) ctx.fillRect(b.x * W, HZ - b.h * H * 0.035, b.w * W + 1, b.h * H * 0.035 + 1);
 
     /* ground, road, reflections */
-    const gnd = ctx.createLinearGradient(0, HZ, 0, H);
-    gnd.addColorStop(0, '#5A2A80'); gnd.addColorStop(0.25, '#341A5E'); gnd.addColorStop(1, '#190D38');
-    ctx.fillStyle = gnd; ctx.fillRect(-30, HZ, W + 60, H - HZ + 30);
+    ctx.fillStyle = '#190D38'; ctx.fillRect(-30, HZ, W + 60, H - HZ + 30);
+    drawMesh(GND, -30, HZ, W + 60, H - HZ + 30);
     const band = 6;
     for (let z = Math.floor((camZ + 0.4) / band) * band; z < ZC; z += band) {
       const z0 = Math.max(z, camZ + 0.4), z1 = z + band;
