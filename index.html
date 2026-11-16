@@ -40,11 +40,8 @@
   #c0 { --d: .47s; --a: -3px; } #c1 { --d: .55s; --dl: -.2s; --a: -3px; }
   #c2 { --d: .43s; --a: -8px; } #c3 { --d: .51s; --dl: -.25s; --a: -8px; }
   @keyframes bop { from { transform: translateY(0); } to { transform: translateY(var(--a)); } }
-  .fx, .dial-ms { display: none; }
+  .fx { display: none; }
   .stage.live .fx { display: block; position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
-  .stage.live .dial-ms { display: block; position: absolute; transform: translate(-50%, -100%); white-space: nowrap;
-    font: 700 12px/1 var(--text); color: var(--ink); font-variant-numeric: tabular-nums; letter-spacing: .05em; }
-  .dial-ms i { font-style: normal; font-size: .68em; color: #B0236B; margin-left: .4em; letter-spacing: 0; }
   .bit { position: absolute; top: 0; will-change: transform; animation: fall var(--t) linear var(--dl) infinite; }
   @keyframes fall { from { transform: translate3d(0, -6vh, 0) rotate(0deg); } to { transform: translate3d(var(--dx), 108vh, 0) rotate(var(--r)); } }
   .fw { position: absolute; width: 36vmin; height: 36vmin; margin: -18vmin 0 0 -18vmin; opacity: 0; will-change: transform, opacity;
@@ -79,9 +76,6 @@
     text-shadow: 0 2px 0 var(--magenta), 0 0 22px rgba(14, 9, 48, .9);
   }
   .cell span { font: 700 clamp(11px, 1.5vw, 14px)/1.2 var(--text); color: var(--marigold); margin-top: 5px; }
-  .ms { font: 500 clamp(12px, 1.6vw, 15px)/1 var(--text); color: var(--paper); opacity: .92;
-    text-shadow: 0 1px 2px rgba(14, 9, 48, .9); }
-  .ms span { font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: .08em; color: var(--teal); }
   .route { display: flex; align-items: center; gap: 12px; font: 700 13px/1.2 var(--text);
     text-shadow: 0 1px 2px rgba(14, 9, 48, .9); }
   .track { position: relative; width: clamp(90px, 18vw, 180px); height: 4px; border-radius: 2px; background: rgba(255, 244, 224, .25); }
@@ -152,7 +146,6 @@
     <canvas id="mid"></canvas>
     <canvas id="scene"></canvas>
     <div class="fx" id="fx"></div>
-    <div class="dial-ms" id="dialMs"><span id="dialMsNum"></span><i>ms</i></div>
     <div class="vignette"></div>
   </div>
 
@@ -164,7 +157,6 @@
       <div class="cell"><b id="hM">00</b><span id="lM">minutes</span></div>
       <div class="cell"><b id="hS">00</b><span id="lS">seconds</span></div>
     </div>
-    <div class="ms"><span id="hMs">0</span> milliseconds</div>
     <div class="route">
       <span id="routeText">Day 1 of 365 on the parade route</span>
       <div class="track"><span class="fill" id="routeFill"></span><span class="goal"></span></div>
@@ -1364,7 +1356,7 @@
       }
       ctx.fillStyle = '#1A1150';
       ctx.font = `700 ${dr * 0.07}px "Bricolage Grotesque", system-ui, sans-serif`;
-      ctx.fillText('until 9 November 2027', cx, dcy + dr * 0.47);
+      ctx.fillText('until 9 November 2027', cx, dcy + dr * 0.36);
       [-1, 0, 1].forEach((i, j) => {
         ctx.fillStyle = ['#12B5A6', '#E63B8A', '#FFB31A'][j];
         ctx.save(); ctx.translate(cx + i * dr * 0.09, dcy - dr * 0.42); ctx.rotate(Math.PI / 4);
@@ -1374,18 +1366,6 @@
     // glass highlight
     }
     if (part === 2) {
-    if (!finaleOn && rem > 10000 && !liveOn) {
-      // the same wait in milliseconds, racing down underneath (fixed pitch so it doesn't jitter)
-      ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-      const msStr = String(Math.max(0, Math.floor(rem))), pitch = dr * 0.058;
-      ctx.fillStyle = '#1A1150';
-      ctx.font = `700 ${dr * 0.092}px "Bricolage Grotesque", system-ui, sans-serif`;
-      const mx0 = cx - (msStr.length + 2.4) * pitch / 2 + pitch / 2;
-      for (let i = 0; i < msStr.length; i++) ctx.fillText(msStr[i], mx0 + i * pitch, dcy + dr * 0.32);
-      ctx.fillStyle = '#B0236B';
-      ctx.font = `700 ${dr * 0.062}px "Bricolage Grotesque", system-ui, sans-serif`;
-      ctx.fillText('ms', mx0 + (msStr.length + 0.9) * pitch, dcy + dr * 0.32);
-    }
     ctx.fillStyle = 'rgba(255,255,255,.2)';
     ctx.beginPath(); ctx.moveTo(cx - dr * 0.8, dcy - dr * 0.2); ctx.lineTo(cx - dr * 0.42, dcy - dr * 0.72); ctx.lineTo(cx - dr * 0.1, dcy - dr * 0.82); ctx.lineTo(cx - dr * 0.62, dcy - dr * 0.3); ctx.closePath(); ctx.fill();
 
@@ -1401,7 +1381,7 @@
   const finaleText = $('finaleText'), finaleSub = $('finaleSub'), hud = $('hud');
   const routeText = $('routeText'), routeFill = $('routeFill'), live = $('live');
   const hudNum = ['hMo', 'hD', 'hH', 'hM', 'hS'].map($), hudLab = ['lMo', 'lD', 'lH', 'lM', 'lS'].map($);
-  const hudLast = [-1, -1, -1, -1, -1], hMs = $('hMs'), stage = $('stage');
+  const hudLast = [-1, -1, -1, -1, -1], stage = $('stage');
 
   let nextLaunch = 0, nextRing = 0, lastRoute = '', lastLive = 0, lastPct = '';
   let last = performance.now(), prevCamZ = null, slow = 0;
@@ -1739,7 +1719,6 @@
     for (let i = 0; i < 5; i++) if (vals[i] !== hudLast[i]) {
       hudLast[i] = vals[i]; hudNum[i].textContent = pad(vals[i]); hudLab[i].textContent = NAMES[i][vals[i] === 1 ? 0 : 1];
     }
-    hMs.textContent = String(Math.max(0, Math.floor(bd.rem)));
     const day = clamp(Math.floor((sim - START) / 864e5) + 1, 1, TOTAL_DAYS);
     const rt = rushing ? 'Fast-forwarding along the route' : `Day ${day} of ${TOTAL_DAYS} on the parade route`;
     if (rt !== lastRoute) { lastRoute = rt; routeText.textContent = rt; }
@@ -1757,7 +1736,7 @@
      Live mode: paint the picture once, then stop drawing.
      CSS moves the crowd, confetti and fireworks; a light timer updates the clock.
      --------------------------------------------------------------- */
-  const dialMs = $('dialMs'), dialMsNum = $('dialMsNum'), fx = $('fx');
+  const fx = $('fx');
   let liveTimer = 0, livePaintedAt = 0, running = false, fxBuilt = false;
 
   function liveState() {
@@ -1793,7 +1772,6 @@
     });
     ctx = topCtx;
     const dr = 36 * TK, dcy = TGY - 40 * TK;
-    dialMs.style.left = W / 2 + 'px'; dialMs.style.top = (dcy + dr * 0.335) + 'px'; dialMs.style.fontSize = Math.max(7, dr * 0.092) + 'px';
     livePaintedAt = Date.now(); lastBgSec = bd.s;
   }
   // once a second only the clock face is repainted
@@ -1810,12 +1788,9 @@
     if (!liveOn || document.hidden) return;
     const sim = realNow(), bd = breakdown(sim);
     if (bd.rem <= 10000) { leaveLive(); return; }   // the last ten seconds and the finale are fully animated
-    const ms = String(Math.floor(bd.rem));
-    hMs.textContent = ms; dialMsNum.textContent = ms;
     if (bd.s !== lastBgSec) {
       lastBgSec = bd.s;
       updateHud(bd, sim, clamp((sim - START) / (TARGET - START), 0, 1), performance.now());
-      hMs.textContent = ms;
       if (Date.now() - livePaintedAt > 600000) paintLive(); else paintDial(bd);
     }
   }
@@ -1861,8 +1836,7 @@
     paintLive();
     const st = liveState();
     updateHud(st.bd, st.sim, st.p, performance.now());
-    dialMsNum.textContent = String(Math.floor(st.bd.rem));
-    if (!liveTimer) liveTimer = setInterval(liveTick, 100);
+    if (!liveTimer) liveTimer = setInterval(liveTick, 250);
   }
   function leaveLive() {
     liveOn = false; stage.classList.remove('live'); bgDirty = true;
