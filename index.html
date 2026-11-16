@@ -31,8 +31,27 @@
     overflow: hidden;
     -webkit-font-smoothing: antialiased;
   }
-  .stage { position: fixed; inset: 0; }
-  .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .stage { position: fixed; inset: 0; overflow: hidden; }
+  /* While you are just watching, the scene is a still picture and the browser moves a few layers itself. */
+  .stage > canvas.crowd { inset: auto; left: 0; display: none; }
+  .stage.live > canvas.crowd { display: block; will-change: transform;
+    animation: bop var(--d, .5s) ease-in-out var(--dl, 0s) infinite alternate; }
+  .stage.live #mid, .stage.live #scene { display: none; }
+  #c0 { --d: .47s; --a: -3px; } #c1 { --d: .55s; --dl: -.2s; --a: -3px; }
+  #c2 { --d: .43s; --a: -8px; } #c3 { --d: .51s; --dl: -.25s; --a: -8px; }
+  @keyframes bop { from { transform: translateY(0); } to { transform: translateY(var(--a)); } }
+  .fx, .dial-ms { display: none; }
+  .stage.live .fx { display: block; position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+  .stage.live .dial-ms { display: block; position: absolute; transform: translate(-50%, -100%); white-space: nowrap;
+    font: 700 12px/1 var(--text); color: var(--ink); font-variant-numeric: tabular-nums; letter-spacing: .05em; }
+  .dial-ms i { font-style: normal; font-size: .68em; color: #B0236B; margin-left: .4em; letter-spacing: 0; }
+  .bit { position: absolute; top: 0; will-change: transform; animation: fall var(--t) linear var(--dl) infinite; }
+  @keyframes fall { from { transform: translate3d(0, -6vh, 0) rotate(0deg); } to { transform: translate3d(var(--dx), 108vh, 0) rotate(var(--r)); } }
+  .fw { position: absolute; width: 36vmin; height: 36vmin; margin: -18vmin 0 0 -18vmin; opacity: 0; will-change: transform, opacity;
+    animation: burst 5.2s ease-out var(--dl) infinite; }
+  @keyframes burst { 0% { transform: scale(.04); opacity: 0; } 2% { opacity: 1; } 20% { transform: scale(1); opacity: .9; }
+    32% { transform: scale(1.05) translateY(3%); opacity: 0; } 100% { transform: scale(1.05); opacity: 0; } }
+  .stage > canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
   .vignette { position: absolute; inset: 0; pointer-events: none;
     background: radial-gradient(ellipse at 50% 45%, rgba(10, 6, 36, 0) 45%, rgba(10, 6, 36, .55) 100%); }
   .stage.shake { animation: shake .8s linear; }
@@ -112,7 +131,8 @@
   @keyframes rise { from { transform: translateY(14px); opacity: 0; } to { transform: none; opacity: 1; } }
 
   @media (prefers-reduced-motion: reduce) {
-    .finale-text.show h2, .finale-text.show p, .stage.shake { animation: none; }
+    .finale-text.show h2, .finale-text.show p, .stage.shake, .stage.live canvas.crowd { animation: none; }
+    .bit, .fw { display: none; }
     button { transition: none; }
   }
   @media (max-width: 520px) {
@@ -125,8 +145,14 @@
   <h1 class="sr-only">Countdown to 9 November 2027</h1>
   <div class="stage" id="stage" aria-hidden="true">
     <canvas id="bg"></canvas>
+    <canvas class="crowd" id="c0"></canvas>
+    <canvas class="crowd" id="c1"></canvas>
+    <canvas class="crowd" id="c2"></canvas>
+    <canvas class="crowd" id="c3"></canvas>
     <canvas id="mid"></canvas>
     <canvas id="scene"></canvas>
+    <div class="fx" id="fx"></div>
+    <div class="dial-ms" id="dialMs"><span id="dialMsNum"></span><i>ms</i></div>
     <div class="vignette"></div>
   </div>
 
@@ -208,7 +234,8 @@
   const cv = document.getElementById('scene');
   const bgCv = document.getElementById('bg'), midCv = document.getElementById('mid');
   const topCtx = cv.getContext('2d'), bgCtx = bgCv.getContext('2d'), midCtx = midCv.getContext('2d');
-  let ctx = topCtx, bgDirty = true;
+  const crowdCv = ['c0', 'c1', 'c2', 'c3'].map(id => document.getElementById(id)), crowdCtx = crowdCv.map(c => c.getContext('2d'));
+  let ctx = topCtx, bgDirty = true, liveOn = false, livePaintT = 0;
   let W = 0, H = 0, DPR = 1, F = 1, maxDPR = 1.5, pixelBudget = 2.0e6, vignette = null;
   let skyC = null, gndC = null, towerC = null, towerCtx = null, towerKey = '', towerK = 1;
 
@@ -219,6 +246,7 @@
     skyC = gndC = towerC = null;
     for (const c of [cv, bgCv, midCv]) { c.width = Math.round(W * DPR); c.height = Math.round(H * DPR); }
     bgDirty = true;
+    if (liveOn) { clearTimeout(livePaintT); livePaintT = setTimeout(paintLive, 150); }
     F = Math.min(H * 0.9, W * 1.6);
   }
   window.addEventListener('resize', resize);
@@ -433,6 +461,7 @@
     }
   }
 
+  people.forEach((m, i) => { m.grp = i % 2; });
   const stars = Array.from({ length: 150 }, () => ({ x: R(), y: R() * 0.7, r: R() * 1.3 + 0.3, ph: R() * TAU }));
   const clouds = Array.from({ length: 7 }, (_, i) => ({ x: R(), y: 0.35 + R() * 0.5, w: 0.25 + R() * 0.3, sp: 0.004 + R() * 0.006, k: i % 3 }));
   const lanterns = Array.from({ length: 34 }, () => ({ x: R(), y: R(), s: 0.5 + R(), ph: R() * TAU, sp: 0.012 + R() * 0.02 }));
@@ -1270,7 +1299,7 @@
     ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
 
     }
-    if (part === 1) {
+    if (part === 1 || part === 3) {
     // dial: shadow, rings, face
     const NG = 24, g0 = -Math.PI / 2 - Math.PI / NG;
     ctx.fillStyle = 'rgba(20,8,50,.45)';
@@ -1345,7 +1374,7 @@
     // glass highlight
     }
     if (part === 2) {
-    if (!finaleOn && rem > 10000) {
+    if (!finaleOn && rem > 10000 && !liveOn) {
       // the same wait in milliseconds, racing down underneath (fixed pitch so it doesn't jitter)
       ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
       const msStr = String(Math.max(0, Math.floor(rem))), pitch = dr * 0.058;
@@ -1413,6 +1442,7 @@
     if (finaleOn && mode === 'live') return;
     backToToday();
     mode = 'preview'; pv0 = performance.now(); pvFrom = realNow(); rushing = true;
+    leaveLive();
     finaleBtn.textContent = 'Back to today';
     if (!A.on) setSound(true);
     whoosh();
@@ -1491,21 +1521,22 @@
   const NEAR = 34;
   let lastBg = 0, lastMid = 0, lastTop = 0, lastBgSec = -1, TK = 1, TGY = 0;
 
-  function collect(lo, hi) {
+  // kinds: 0 everything, 1 only street furniture and spectators, 2 only the parade; grp picks one half of the marchers
+  function collect(lo, hi, kinds = 0, grp = -1) {
     items.length = 0;
     const maxInd = Math.min(LOOP - 8, dist - 12, 150 * quality + 10);
-    for (const l of lamps) { const dz = l.z - camZ; if (dz > 0.6 && dz >= lo && dz < Math.min(hi, 300)) items.push({ z: dz, t: 0, o: l }); }
-    for (const g of garlands) { const dz = g.z0 + 7 - camZ; if (dz > -6 && dz >= (lo || -6) && dz < Math.min(hi, 100 * quality)) items.push({ z: dz, t: 1, o: g }); }
-    for (const m of people) { const dz = wrap(m.wz); if (dz > 0.7 && dz >= lo && dz < hi && dz < maxInd) items.push({ z: dz, t: 2, o: m }); }
-    for (const fl of floats) { const dz = wrap(fl.wz), key = dz + 2.5; if (dz > 0.7 && key >= lo && key < hi && dz < maxInd) items.push({ z: key, t: 3, o: fl, d: dz }); }
-    for (const b of balloons) { const dz = wrap(b.wz); if (dz > 1.5 && dz >= lo && dz < hi && dz < maxInd) items.push({ z: dz, t: 4, o: b }); }
+    for (const l of lamps) { const dz = l.z - camZ; if (kinds !== 2 && dz > 0.6 && dz >= lo && dz < Math.min(hi, 300)) items.push({ z: dz, t: 0, o: l }); }
+    for (const g of garlands) { const dz = g.z0 + 7 - camZ; if (kinds !== 2 && dz > -6 && dz >= (lo || -6) && dz < Math.min(hi, 100 * quality)) items.push({ z: dz, t: 1, o: g }); }
+    for (const m of people) { const dz = wrap(m.wz); if (kinds !== 1 && (grp < 0 || m.grp === grp) && dz > 0.7 && dz >= lo && dz < hi && dz < maxInd) items.push({ z: dz, t: 2, o: m }); }
+    for (const fl of floats) { const dz = wrap(fl.wz), key = dz + 2.5; if (kinds !== 1 && grp <= 0 && !(liveOn && kinds === 2 && dz < 25) && dz > 0.7 && key >= lo && key < hi && dz < maxInd) items.push({ z: key, t: 3, o: fl, d: dz }); }
+    for (const b of balloons) { const dz = wrap(b.wz); if (kinds !== 1 && grp <= 0 && !(liveOn && kinds === 0) && !(liveOn && kinds === 2 && dz < 25) && dz > 1.5 && dz >= lo && dz < hi && dz < maxInd) items.push({ z: dz, t: 4, o: b }); }
     for (const dg of dragons) {
       const base = wrap(dg.wz);
-      for (let i = 0; i < DRAGON_N; i++) { const dz = base + i * 0.95; if (dz > 0.8 && dz >= lo && dz < hi && dz < maxInd) items.push({ z: dz, t: 5, o: dg, i }); }
+      for (let i = 0; i < DRAGON_N; i++) { const dz = base + i * 0.95; if (kinds !== 1 && grp <= 0 && dz > 0.8 && dz >= lo && dz < hi && dz < maxInd) items.push({ z: dz, t: 5, o: dg, i }); }
     }
     const specEnd = Math.min(camZ + Math.min(hi, 58 * quality), END_Z);
     for (let i = Math.ceil((camZ + Math.max(1, lo)) / 1.25); i * 1.25 < specEnd; i++) {
-      if (i < 0) continue;
+      if (i < 0 || kinds === 2) continue;
       const dz = i * 1.25 - camZ;
       items.push({ z: dz + 0.05, t: 6, i, row: 1 }); items.push({ z: dz, t: 6, i, row: 0 });
     }
@@ -1702,7 +1733,144 @@
     }
   }
 
+  function updateHud(bd, sim, p, now) {
+    // top-of-screen countdown
+    const vals = [bd.mo, bd.d, bd.h, bd.m, bd.s];
+    for (let i = 0; i < 5; i++) if (vals[i] !== hudLast[i]) {
+      hudLast[i] = vals[i]; hudNum[i].textContent = pad(vals[i]); hudLab[i].textContent = NAMES[i][vals[i] === 1 ? 0 : 1];
+    }
+    hMs.textContent = String(Math.max(0, Math.floor(bd.rem)));
+    const day = clamp(Math.floor((sim - START) / 864e5) + 1, 1, TOTAL_DAYS);
+    const rt = rushing ? 'Fast-forwarding along the route' : `Day ${day} of ${TOTAL_DAYS} on the parade route`;
+    if (rt !== lastRoute) { lastRoute = rt; routeText.textContent = rt; }
+    const pct = (p * 100).toFixed(1) + '%';
+    if (pct !== lastPct) { lastPct = pct; routeFill.style.width = pct; }
+
+    if (!finaleOn && mode === 'live' && now - lastLive > 60000) {
+      lastLive = now;
+      const parts = [[bd.mo, 'month'], [bd.d, 'day'], [bd.h, 'hour'], [bd.m, 'minute']].map(([v, n]) => `${v} ${n}${v === 1 ? '' : 's'}`);
+      live.textContent = `${parts.slice(0, -1).join(', ')} and ${parts[3]} until 9 November 2027.`;
+    }
+  }
+
+  /* ---------------------------------------------------------------
+     Live mode: paint the picture once, then stop drawing.
+     CSS moves the crowd, confetti and fireworks; a light timer updates the clock.
+     --------------------------------------------------------------- */
+  const dialMs = $('dialMs'), dialMsNum = $('dialMsNum'), fx = $('fx');
+  let liveTimer = 0, livePaintedAt = 0, running = false, fxBuilt = false;
+
+  function liveState() {
+    const sim = realNow(), bd = breakdown(sim);
+    const p = clamp((sim - START) / (TARGET - START), 0, 1);
+    dist = D0 + (D1 - D0) * p; camZ = ZC - dist; camSpeed = 0; prevCamZ = null;
+    HZ = H * (0.44 - 0.10 * p) + (YC - CAMH) * F / dist;
+    TK = (F / dist) * TS; TGY = HZ + CAMH * F / dist;
+    return { sim, bd, p };
+  }
+  function paintLive() {
+    if (!liveOn) return;
+    const { bd } = liveState();
+    renderBg(bd, performance.now());
+    ctx = bgCtx; ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    drawTower(bd, bd.rem, 2, TK, W / 2, TGY);
+    collect(60, 1e9, 0);          // everything far away is part of the still picture
+    collect(0, 60, 1);            // plus the lamps, flags and spectators near you
+    // big pieces right next to you stay in the still picture, so the moving layers can be small strips
+    for (const fl of floats) { const dz = wrap(fl.wz); if (dz > 0.7 && dz < 25) drawFloat(fl, camZ + dz, fogOf(dz)); }
+    for (const b of balloons) { const dz = wrap(b.wz); if (dz > 1.5 && dz < 25) drawBalloon(b, camZ + dz, fogOf(dz)); }
+    // the marchers: two strips for the middle of the street, two for the dancers near you
+    const bands = [[25, 60, 0], [25, 60, 1], [0, 25, 0], [0, 25, 1]];
+    bands.forEach(([lo, hi, g], i) => {
+      const c = crowdCv[i];
+      const top = Math.max(0, Math.floor(HZ - H * (lo ? 0.3 : 0.15)));
+      const bottom = lo ? Math.min(H + 16, Math.ceil(HZ + H * 0.14)) : H + 16;
+      c.style.top = top + 'px'; c.style.height = (bottom - top) + 'px';
+      c.width = Math.round(W * DPR); c.height = Math.round((bottom - top) * DPR);
+      ctx = crowdCtx[i]; ctx.setTransform(DPR, 0, 0, DPR, 0, -top * DPR);
+      collect(lo, hi, 2, g);
+      if (i === 0) for (const b of balloons) { const dz = wrap(b.wz); if (dz >= 60 && dz < 160) drawBalloon(b, camZ + dz, fogOf(dz)); }
+    });
+    ctx = topCtx;
+    const dr = 36 * TK, dcy = TGY - 40 * TK;
+    dialMs.style.left = W / 2 + 'px'; dialMs.style.top = (dcy + dr * 0.335) + 'px'; dialMs.style.fontSize = Math.max(7, dr * 0.092) + 'px';
+    livePaintedAt = Date.now(); lastBgSec = bd.s;
+  }
+  // once a second only the clock face is repainted
+  function paintDial(bd) {
+    ctx = bgCtx; ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    const cx = W / 2, dr = 36 * TK, dcy = TGY - 40 * TK;
+    ctx.save(); ctx.beginPath(); ctx.arc(cx, dcy, dr * 1.06, 0, TAU); ctx.clip();
+    drawTower(bd, bd.rem, 3, TK, cx, TGY);
+    ctx.fillStyle = 'rgba(255,255,255,.2)';
+    ctx.beginPath(); ctx.moveTo(cx - dr * 0.8, dcy - dr * 0.2); ctx.lineTo(cx - dr * 0.42, dcy - dr * 0.72); ctx.lineTo(cx - dr * 0.1, dcy - dr * 0.82); ctx.lineTo(cx - dr * 0.62, dcy - dr * 0.3); ctx.closePath(); ctx.fill();
+    ctx.restore(); ctx = topCtx;
+  }
+  function liveTick() {
+    if (!liveOn || document.hidden) return;
+    const sim = realNow(), bd = breakdown(sim);
+    if (bd.rem <= 10000) { leaveLive(); return; }   // the last ten seconds and the finale are fully animated
+    const ms = String(Math.floor(bd.rem));
+    hMs.textContent = ms; dialMsNum.textContent = ms;
+    if (bd.s !== lastBgSec) {
+      lastBgSec = bd.s;
+      updateHud(bd, sim, clamp((sim - START) / (TARGET - START), 0, 1), performance.now());
+      hMs.textContent = ms;
+      if (Date.now() - livePaintedAt > 600000) paintLive(); else paintDial(bd);
+    }
+  }
+  function burstArt(c) {
+    const g = c.getContext('2d'), col = pick(FW_COLS), col2 = pick(FW_COLS);
+    g.clearRect(0, 0, 200, 200);
+    for (let i = 0; i < 40; i++) {
+      const a = (i / 40) * TAU + R() * 0.08, r1 = 96 * (0.7 + R() * 0.3), r0 = r1 * (0.4 + R() * 0.25);
+      g.strokeStyle = i % 2 ? col : col2; g.lineWidth = 2.6;
+      g.beginPath(); g.moveTo(100 + Math.cos(a) * r0, 100 + Math.sin(a) * r0); g.lineTo(100 + Math.cos(a) * r1, 100 + Math.sin(a) * r1); g.stroke();
+    }
+    g.fillStyle = '#FFF4E0'; g.beginPath(); for (let i = 0; i < 6; i++) g.lineTo(100 + Math.cos(i * TAU / 6) * 7, 100 + Math.sin(i * TAU / 6) * 7); g.fill();
+  }
+  function placeBurst(c) {
+    burstArt(c);
+    // keep the whole burst clear of the clock; on narrow screens there is no room beside it, so skip them
+    const hw = RC * F / dist * 1.1 + Math.min(W, H) * 0.18, room = W / 2 - hw;
+    c.style.display = room > 30 ? '' : 'none';
+    const x = R() < 0.5 ? R() * room : W / 2 + hw + R() * room;
+    c.style.left = x + 'px'; c.style.top = (H * (0.16 + R() * 0.26)) + 'px';
+  }
+  function buildFx() {
+    if (fxBuilt || reduce) return;
+    fxBuilt = true;
+    for (let i = 0; i < 26; i++) {
+      const b = document.createElement('i'); b.className = 'bit';
+      b.style.cssText = `left:${(R() * 100).toFixed(1)}%;background:${pick(CONFETTI)};width:${(5 + R() * 7).toFixed(0)}px;height:${(3 + R() * 4).toFixed(0)}px;` +
+        `--t:${(7 + R() * 7).toFixed(1)}s;--dl:${(-R() * 14).toFixed(1)}s;--dx:${((R() - 0.5) * 30).toFixed(0)}vw;--r:${((R() < 0.5 ? -1 : 1) * (400 + R() * 900)).toFixed(0)}deg`;
+      fx.appendChild(b);
+    }
+    for (let k = 0; k < 3; k++) {
+      const c = document.createElement('canvas'); c.className = 'fw'; c.width = c.height = 200;
+      c.style.setProperty('--dl', (-k * 1.75) + 's');
+      placeBurst(c); c.addEventListener('animationiteration', () => placeBurst(c));
+      fx.appendChild(c);
+    }
+  }
+  function enterLive() {
+    running = false; liveOn = true;
+    for (const c of [midCtx, topCtx]) { c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, cv.width, cv.height); }
+    buildFx();
+    stage.classList.add('live');
+    paintLive();
+    const st = liveState();
+    updateHud(st.bd, st.sim, st.p, performance.now());
+    dialMsNum.textContent = String(Math.floor(st.bd.rem));
+    if (!liveTimer) liveTimer = setInterval(liveTick, 100);
+  }
+  function leaveLive() {
+    liveOn = false; stage.classList.remove('live'); bgDirty = true;
+    if (!running) { running = true; last = performance.now(); lastTop = 0; requestAnimationFrame(frame); }
+  }
+
   function frame(now) {
+    if (mode === 'live' && !finaleOn && TARGET - realNow() > 10000) { enterLive(); return; }
     requestAnimationFrame(frame);
     if (now - lastTop < 30) return;            // 30 frames a second is plenty here
     const rawDt = (now - last) / 1000;
@@ -1735,23 +1903,7 @@
     TK = (F / dist) * TS; TGY = HZ + CAMH * F / dist;
     drift += dt * (finaleOn ? 0.25 : 0.85);   // the column keeps marching past you
 
-    // top-of-screen countdown
-    const vals = [bd.mo, bd.d, bd.h, bd.m, bd.s];
-    for (let i = 0; i < 5; i++) if (vals[i] !== hudLast[i]) {
-      hudLast[i] = vals[i]; hudNum[i].textContent = pad(vals[i]); hudLab[i].textContent = NAMES[i][vals[i] === 1 ? 0 : 1];
-    }
-    hMs.textContent = String(Math.max(0, Math.floor(bd.rem)));
-    const day = clamp(Math.floor((sim - START) / 864e5) + 1, 1, TOTAL_DAYS);
-    const rt = rushing ? 'Fast-forwarding along the route' : `Day ${day} of ${TOTAL_DAYS} on the parade route`;
-    if (rt !== lastRoute) { lastRoute = rt; routeText.textContent = rt; }
-    const pct = (p * 100).toFixed(1) + '%';
-    if (pct !== lastPct) { lastPct = pct; routeFill.style.width = pct; }
-
-    if (!finaleOn && mode === 'live' && now - lastLive > 60000) {
-      lastLive = now;
-      const parts = [[bd.mo, 'month'], [bd.d, 'day'], [bd.h, 'hour'], [bd.m, 'minute']].map(([v, n]) => `${v} ${n}${v === 1 ? '' : 's'}`);
-      live.textContent = `${parts.slice(0, -1).join(', ')} and ${parts[3]} until 9 November 2027.`;
-    }
+    updateHud(bd, sim, p, now);
 
     /* fireworks update */
     const fwEvery = finaleOn ? (reduce ? 0.7 : 0.2) : (rushing ? 0.45 : (reduce ? 3.2 : 1.5));
@@ -1791,8 +1943,9 @@
   if (document.fonts && document.fonts.load) {
     document.fonts.load('800 40px "Big Shoulders Display"');
     document.fonts.load('700 20px "Bricolage Grotesque"');
+    document.fonts.ready.then(() => { if (liveOn) paintLive(); });
   }
-  requestAnimationFrame(frame);
+  if (TARGET - realNow() > 10000) enterLive(); else leaveLive();
 
   // If the real moment has already passed, the celebration just keeps going.
   if (realNow() >= TARGET) finaleBtn.hidden = true;
